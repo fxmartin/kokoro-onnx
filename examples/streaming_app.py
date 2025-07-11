@@ -24,9 +24,11 @@ import gradio as gr
 import numpy as np
 import PyPDF2
 import time
+import tempfile
 
 from kokoro_onnx import Kokoro
 from kokoro_onnx.tokenizer import Tokenizer
+from kokoro_onnx.convert import convert_audio, SUPPORTED_FORMATS, BITRATE_OPTIONS
 
 tokenizer = Tokenizer()
 kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
@@ -240,13 +242,133 @@ def create_streaming_app():
                     step=0.1
                 )
                 
+                # Audio Format Controls
+                gr.Markdown("### 🎵 Audio Format Settings")
+                
+                # Quick format recommendations
+                with gr.Row():
+                    quick_format_btns = []
+                    for fmt, desc in [
+                        ("wav", "🎵 Best Quality"),
+                        ("mp3", "🎧 Most Compatible"),
+                        ("flac", "🎶 Best Compression"),
+                        ("m4a", "📱 Mobile Friendly")
+                    ]:
+                        btn = gr.Button(desc, size="sm", scale=1)
+                        quick_format_btns.append((btn, fmt))
+                
+                def set_quick_format(format_type):
+                    bitrate_settings = {
+                        "wav": "192k",    # Not used but for consistency
+                        "mp3": "192k",    # Good balance
+                        "flac": "192k",   # Not used but for consistency  
+                        "m4a": "192k"     # Good for mobile
+                    }
+                    return format_type, bitrate_settings.get(format_type, "192k")
+                
+                with gr.Row():
+                    format_input = gr.Radio(
+                        label="Output Format",
+                        value="wav",
+                        choices=[
+                            ("🎵 WAV - Uncompressed (Highest Quality)", "wav"),
+                            ("🎶 FLAC - Lossless (High Quality, Smaller)", "flac"), 
+                            ("🎧 MP3 - Lossy (Good Quality, Small)", "mp3"),
+                            ("📱 M4A - Lossy (Good Quality, Mobile)", "m4a"),
+                            ("🔊 OGG - Lossy (Good Quality, Open)", "ogg")
+                        ],
+                        scale=3
+                    )
+                    
+                with gr.Row():
+                    bitrate_input = gr.Dropdown(
+                        label="Audio Quality (for MP3/M4A/OGG)",
+                        value="192k",
+                        choices=[
+                            ("96 kbps - Lower quality, smaller file", "96k"),
+                            ("128 kbps - Standard quality", "128k"), 
+                            ("192 kbps - High quality (recommended)", "192k"),
+                            ("256 kbps - Very high quality", "256k"),
+                            ("320 kbps - Maximum quality", "320k")
+                        ],
+                        scale=2
+                    )
+                    
+                
+                format_info = gr.Markdown(
+                    value="**WAV**: Uncompressed audio, largest file size, perfect quality"
+                )
+                
+                # File size estimation
+                size_estimate = gr.Markdown(
+                    value="📊 **Estimated file size**: ~240 KB (for 10 seconds)",
+                    visible=True
+                )
+                
+                # Update format info and bitrate visibility when format changes
+                def update_format_info_and_controls(format_choice, bitrate_choice):
+                    format_descriptions = {
+                        "wav": "**WAV**: Uncompressed audio, largest file size, perfect quality. Best for: Archival, editing",
+                        "flac": "**FLAC**: Lossless compression, ~50% smaller than WAV, perfect quality. Best for: High-quality storage", 
+                        "mp3": "**MP3**: Lossy compression, small files, widely compatible. Best for: Sharing, streaming",
+                        "m4a": "**M4A**: Lossy compression, small files, great for mobile devices. Best for: Mobile, iTunes",
+                        "ogg": "**OGG**: Lossy compression, open standard, good quality. Best for: Web, open-source apps"
+                    }
+                    
+                    # Calculate estimated file size for 10 seconds of audio
+                    if format_choice == "wav":
+                        size_kb = 24000 * 2 * 10 / 1024  # 24kHz * 2 bytes * 10 seconds
+                        size_info = f"📊 **Estimated size**: ~{size_kb:.0f} KB (for 10s) - Uncompressed"
+                        bitrate_visible = gr.update(visible=False)
+                    elif format_choice == "flac":
+                        size_kb = (24000 * 2 * 10 / 1024) * 0.5  # ~50% compression
+                        size_info = f"📊 **Estimated size**: ~{size_kb:.0f} KB (for 10s) - Lossless compression"
+                        bitrate_visible = gr.update(visible=False)
+                    else:  # Lossy formats
+                        bitrate_num = int(bitrate_choice.replace('k', ''))
+                        size_kb = (bitrate_num * 10) / 8  # bitrate * duration / 8 bits per byte
+                        size_info = f"📊 **Estimated size**: ~{size_kb:.0f} KB (for 10s) - {bitrate_num} kbps"
+                        bitrate_visible = gr.update(visible=True)
+                    
+                    format_desc = format_descriptions.get(format_choice, "Select a format to see details")
+                    
+                    return format_desc, size_info, bitrate_visible
+                
+                # Update bitrate visibility based on format
+                def update_bitrate_visibility(format_choice):
+                    lossy_formats = ["mp3", "m4a", "ogg"]
+                    return gr.update(visible=format_choice in lossy_formats)
+                
+                format_input.change(
+                    fn=lambda fmt, br: update_format_info_and_controls(fmt, br),
+                    inputs=[format_input, bitrate_input],
+                    outputs=[format_info, size_estimate, bitrate_input]
+                )
+                
+                bitrate_input.change(
+                    fn=lambda fmt, br: update_format_info_and_controls(fmt, br)[1],
+                    inputs=[format_input, bitrate_input],
+                    outputs=[size_estimate]
+                )
+                
+                # Connect quick format buttons
+                for btn, fmt in quick_format_btns:
+                    btn.click(
+                        fn=lambda f=fmt: set_quick_format(f),
+                        outputs=[format_input, bitrate_input]
+                    )
+                
                 generate_btn = gr.Button("🎤 Generate Speech", variant="primary")
                 
             with gr.Column(scale=1):
                 audio_output = gr.Audio(
-                    label="Generated Audio",
+                    label="Audio Preview",
                     streaming=True,
                     autoplay=True
+                )
+                download_output = gr.File(
+                    label="Download Audio File",
+                    visible=True
                 )
                 metrics_display = gr.Markdown(
                     value="*Generate audio to see processing metrics*",
@@ -326,17 +448,19 @@ def create_streaming_app():
                 return ""
         
         # Handle button click
-        async def handle_generate(text, file_content, voice, language_name, speed):
+        async def handle_generate(text, file_content, voice, language_name, speed, output_format, bitrate):
             # Use file content if available, otherwise use text input
-            input_text = file_content.strip() if file_content.strip() else text.strip()
+            file_text = file_content.strip() if file_content else ""
+            text_input = text.strip() if text else ""
+            input_text = file_text if file_text else text_input
             
             if not input_text:
                 gr.Warning("Please enter text or upload a file")
-                return None, ""
+                return None, None, ""
                 
             if not voice:
                 gr.Warning("Please select a voice")
-                return None, ""
+                return None, None, ""
                 
             try:
                 # Start timing
@@ -376,15 +500,42 @@ def create_streaming_app():
 - Audio Duration: {audio_duration:.2f} seconds
 - Speed Ratio: {audio_duration/processing_time:.1f}x real-time
 - Sample Rate: {sample_rate:,} Hz
-- Audio Samples: {len(complete_audio):,}"""
+- Audio Samples: {len(complete_audio):,}
+- Output Format: {SUPPORTED_FORMATS[output_format]['name']}"""
                     
-                    return (sample_rate, complete_audio), metrics_text
+                    # Handle audio conversion and download file
+                    download_file = None
+                    try:
+                        if output_format.lower() == "wav":
+                            # Create WAV file for download using soundfile
+                            import soundfile as sf
+                            with tempfile.NamedTemporaryFile(
+                                suffix=".wav", 
+                                delete=False
+                            ) as temp_file:
+                                sf.write(temp_file.name, complete_audio, sample_rate)
+                                download_file = temp_file.name
+                        else:
+                            # Convert to requested format and create downloadable file
+                            audio_data = convert_audio(complete_audio, sample_rate, output_format, bitrate)
+                            
+                            # Create temporary file for download
+                            with tempfile.NamedTemporaryFile(
+                                suffix=f".{output_format}", 
+                                delete=False
+                            ) as temp_file:
+                                temp_file.write(audio_data)
+                                download_file = temp_file.name
+                    except Exception as e:
+                        metrics_text += f"\n- Conversion Error: {str(e)}"
+                    
+                    return (sample_rate, complete_audio), download_file, metrics_text
                 else:
-                    return None, ""
+                    return None, None, ""
                     
             except Exception as e:
                 gr.Error(f"Error generating audio: {str(e)}")
-                return None, ""
+                return None, None, ""
         
         # Update quality dropdown when language changes
         language_input.change(
@@ -434,21 +585,33 @@ def create_streaming_app():
         
         generate_btn.click(
             fn=handle_generate,
-            inputs=[text_input, file_text_display, voice_input, language_input, speed_input],
-            outputs=[audio_output, metrics_display]
+            inputs=[text_input, file_text_display, voice_input, language_input, speed_input, format_input, bitrate_input],
+            outputs=[audio_output, download_output, metrics_display]
         )
+        
+        # Add format information
+        gr.Markdown("""
+        ### 🎵 Audio Format Information:
+        - **WAV**: Uncompressed, highest quality, larger file size
+        - **FLAC**: Lossless compression, high quality, moderate file size  
+        - **MP3**: Lossy compression, good quality, small file size
+        - **M4A/AAC**: Lossy compression, good quality, small file size
+        - **OGG**: Lossy compression, good quality, small file size
+        
+        *Bitrate setting only affects lossy formats (MP3, M4A, OGG)*
+        """)
         
         # Add example texts in multiple languages with human readable names
         gr.Examples(
             examples=[
-                ["Hello, this is a test of Kokoro TTS streaming capabilities.", "af_sky", "American English", "All Qualities", "All Genders", 1.0],
-                ["The quick brown fox jumps over the lazy dog.", "af_bella", "American English", "High Quality", "Female", 1.2],
-                ["Welcome to the future of text-to-speech technology!", "af_sarah", "American English", "Medium Quality", "Female", 0.9],
-                ["Good morning! How are you today?", "bf_alice", "British English", "Medium Quality", "Female", 1.0],
-                ["こんにちは、元気ですか？", "jf_alpha", "Japanese", "Medium Quality", "Female", 1.0],
-                ["Bonjour, comment allez-vous?", "ff_siwis", "French", "Medium Quality", "Female", 1.0],
+                ["Hello, this is a test of Kokoro TTS streaming capabilities.", "af_sky", "American English", "Low Quality", "Female", 1.0, "wav", "128k"],
+                ["The quick brown fox jumps over the lazy dog.", "af_bella", "American English", "High Quality", "Female", 1.2, "mp3", "192k"],
+                ["Welcome to the future of text-to-speech technology!", "af_sarah", "American English", "Medium Quality", "Female", 0.9, "flac", "128k"],
+                ["Good morning! How are you today?", "bf_alice", "British English", "Medium Quality", "Female", 1.0, "m4a", "128k"],
+                ["こんにちは、元気ですか？", "jf_alpha", "Japanese", "Medium Quality", "Female", 1.0, "ogg", "192k"],
+                ["Bonjour, comment allez-vous?", "ff_siwis", "French", "Medium Quality", "Female", 1.0, "wav", "128k"],
             ],
-            inputs=[text_input, voice_input, language_input, quality_input, gender_input, speed_input],
+            inputs=[text_input, voice_input, language_input, quality_input, gender_input, speed_input, format_input, bitrate_input],
         )
         
     return ui
