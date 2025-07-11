@@ -1,7 +1,7 @@
 """
-Kokoro TTS Main Application
+Text To Speech App using Kokoro ONNX
 
-A comprehensive streaming Gradio app for Kokoro TTS with multi-language support.
+A comprehensive streaming Gradio app for text-to-speech with multi-language support.
 
 Download model files:
 wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
@@ -218,9 +218,9 @@ def get_available_genders_for_language(
 def create_streaming_app():
     with gr.Blocks(
         theme=gr.themes.Soft(font=[gr.themes.GoogleFont("Roboto")]),
-        title="Kokoro TTS Streaming",
+        title="Text To Speech App using Kokoro ONNX",
     ) as ui:
-        gr.Markdown("# 🎵 Kokoro TTS Streaming")
+        gr.Markdown("# 🎵 Text To Speech App using Kokoro ONNX")
         gr.Markdown("### Multi-language Text-to-Speech with Advanced Filtering")
         gr.Markdown(
             "Filter by **language**, **quality level**, and **gender** to find the perfect voice from 149 options across 9+ languages!"
@@ -232,7 +232,7 @@ def create_streaming_app():
                     text_input = gr.TextArea(
                         label="Input Text",
                         placeholder="Enter text to convert to speech...",
-                        value="Kokoro TTS streaming demo. Real-time speech synthesis!",
+                        value="Text-to-speech demo using Kokoro ONNX. Real-time speech synthesis!",
                         lines=4,
                     )
 
@@ -718,7 +718,7 @@ def create_streaming_app():
         gr.Examples(
             examples=[
                 [
-                    "Hello, this is a test of Kokoro TTS streaming capabilities.",
+                    "Hello, this is a test of Text To Speech App using Kokoro ONNX capabilities.",
                     "af_sky",
                     "American English",
                     "Low Quality",
@@ -794,8 +794,8 @@ def create_streaming_app():
 
 
 def main():
-    """Main entry point for the Kokoro TTS application."""
-    logger.info("=== KOKORO TTS APPLICATION STARTING ===")
+    """Main entry point for the Text To Speech App using Kokoro ONNX."""
+    logger.info("=== TEXT TO SPEECH APP USING KOKORO ONNX STARTING ===")
     
     app = create_streaming_app()
     

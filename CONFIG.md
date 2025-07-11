@@ -1,6 +1,6 @@
-# Kokoro TTS Configuration Guide
+# Text To Speech App using Kokoro ONNX Configuration Guide
 
-This document explains how to configure Kokoro TTS using the `.env` file.
+This document explains how to configure Text To Speech App using Kokoro ONNX with the `.env` file.
 
 ## Quick Start
 

@@ -1,7 +1,7 @@
 [project]
 name = "kokoro-onnx"
 version = "0.5.0"
-description = "TTS with kokoro and onnx runtime"
+description = "Text To Speech App using Kokoro ONNX"
 readme = "README.md"
 authors = [
     { name = "thewh1teagle", email = "61390950+thewh1teagle@users.noreply.github.com" },
