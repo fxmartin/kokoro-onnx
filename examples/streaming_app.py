@@ -21,6 +21,9 @@ uv run examples/streaming_app.py
 """
 
 import gradio as gr
+import numpy as np
+import PyPDF2
+import time
 
 from kokoro_onnx import Kokoro
 from kokoro_onnx.tokenizer import Tokenizer
@@ -179,12 +182,26 @@ def create_streaming_app():
         
         with gr.Row():
             with gr.Column(scale=2):
-                text_input = gr.TextArea(
-                    label="Input Text",
-                    placeholder="Enter text to convert to speech...",
-                    value="Kokoro TTS streaming demo. Real-time speech synthesis!",
-                    lines=4
-                )
+                with gr.Tab("Text Input"):
+                    text_input = gr.TextArea(
+                        label="Input Text",
+                        placeholder="Enter text to convert to speech...",
+                        value="Kokoro TTS streaming demo. Real-time speech synthesis!",
+                        lines=4
+                    )
+                
+                with gr.Tab("File Upload"):
+                    file_input = gr.File(
+                        label="Upload Text/PDF File",
+                        file_types=[".txt", ".md", ".rtf", ".pdf"],
+                        file_count="single"
+                    )
+                    file_text_display = gr.TextArea(
+                        label="File Content",
+                        placeholder="File content will appear here...",
+                        lines=4,
+                        interactive=False
+                    )
                 
                 with gr.Row():
                     language_input = gr.Dropdown(
@@ -231,6 +248,10 @@ def create_streaming_app():
                     streaming=True,
                     autoplay=True
                 )
+                metrics_display = gr.Markdown(
+                    value="*Generate audio to see processing metrics*",
+                    visible=True
+                )
         
         # Update quality choices when language changes
         def update_quality_choices(language_name):
@@ -249,26 +270,121 @@ def create_streaming_app():
                 return gr.update(choices=voices, value=voices[0])
             return gr.update(choices=[], value=None)
         
+        # Handle file upload
+        def handle_file_upload(file):
+            if file is None:
+                return ""
+            
+            try:
+                file_path = file.name
+                file_extension = file_path.lower().split('.')[-1]
+                content = ""
+                
+                if file_extension == 'pdf':
+                    # Handle PDF files
+                    try:
+                        with open(file_path, 'rb') as pdf_file:
+                            pdf_reader = PyPDF2.PdfReader(pdf_file)
+                            text_parts = []
+                            
+                            for page_num in range(len(pdf_reader.pages)):
+                                page = pdf_reader.pages[page_num]
+                                text_parts.append(page.extract_text())
+                            
+                            content = '\n'.join(text_parts)
+                            
+                    except Exception as pdf_error:
+                        gr.Warning(f"Error reading PDF: {str(pdf_error)}")
+                        return ""
+                        
+                else:
+                    # Handle text files - try different encodings
+                    encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+                    
+                    for encoding in encodings:
+                        try:
+                            with open(file_path, 'r', encoding=encoding) as f:
+                                content = f.read()
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                
+                if not content:
+                    gr.Warning("Could not extract text from file. Please ensure it's a valid text or PDF file.")
+                    return ""
+                
+                # Limit content length for performance
+                max_chars = 10000
+                if len(content) > max_chars:
+                    content = content[:max_chars] + "\n\n[Content truncated - file too long]"
+                    gr.Info(f"File content truncated to {max_chars} characters for performance")
+                
+                return content
+                
+            except Exception as e:
+                gr.Warning(f"Error reading file: {str(e)}")
+                return ""
+        
         # Handle button click
-        async def handle_generate(text, voice, language_name, speed):
-            if not text.strip():
-                gr.Warning("Please enter some text")
-                return None
+        async def handle_generate(text, file_content, voice, language_name, speed):
+            # Use file content if available, otherwise use text input
+            input_text = file_content.strip() if file_content.strip() else text.strip()
+            
+            if not input_text:
+                gr.Warning("Please enter text or upload a file")
+                return None, ""
                 
             if not voice:
                 gr.Warning("Please select a voice")
-                return None
+                return None, ""
                 
             try:
+                # Start timing
+                start_time = time.time()
+                
                 language_code = get_language_code(language_name)
-                phonemes = tokenizer.phonemize(text, lang=language_code)
-                samples, sample_rate = kokoro.create(
-                    phonemes, voice=voice, speed=speed, is_phonemes=True
+                
+                # Use streaming for faster generation but collect all chunks
+                stream = kokoro.create_stream(
+                    input_text,
+                    voice=voice,
+                    speed=speed,
+                    lang=language_code
                 )
-                return (sample_rate, samples)
+                
+                # Collect all audio chunks
+                all_samples = []
+                sample_rate = None
+                
+                async for samples, sr in stream:
+                    if sample_rate is None:
+                        sample_rate = sr
+                    all_samples.append(samples)
+                
+                # Calculate timing and metrics
+                end_time = time.time()
+                processing_time = end_time - start_time
+                
+                # Return complete audio and metrics
+                if all_samples:
+                    complete_audio = np.concatenate(all_samples)
+                    audio_duration = len(complete_audio) / sample_rate
+                    
+                    # Format metrics
+                    metrics_text = f"""**Generation Metrics:**
+- Processing Time: {processing_time:.2f} seconds
+- Audio Duration: {audio_duration:.2f} seconds
+- Speed Ratio: {audio_duration/processing_time:.1f}x real-time
+- Sample Rate: {sample_rate:,} Hz
+- Audio Samples: {len(complete_audio):,}"""
+                    
+                    return (sample_rate, complete_audio), metrics_text
+                else:
+                    return None, ""
+                    
             except Exception as e:
                 gr.Error(f"Error generating audio: {str(e)}")
-                return None
+                return None, ""
         
         # Update quality dropdown when language changes
         language_input.change(
@@ -309,10 +425,17 @@ def create_streaming_app():
             outputs=[voice_input]
         )
         
+        # Connect file upload to display content
+        file_input.change(
+            fn=handle_file_upload,
+            inputs=[file_input],
+            outputs=[file_text_display]
+        )
+        
         generate_btn.click(
             fn=handle_generate,
-            inputs=[text_input, voice_input, language_input, speed_input],
-            outputs=[audio_output]
+            inputs=[text_input, file_text_display, voice_input, language_input, speed_input],
+            outputs=[audio_output, metrics_display]
         )
         
         # Add example texts in multiple languages with human readable names

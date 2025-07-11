@@ -13,6 +13,8 @@ dependencies = [
     "espeakng-loader>=0.2.4",
     "phonemizer-fork>=3.3.2",
     "numpy>=2.0.2",
+    "soundfile>=0.13.0",
+    "pypdf2>=3.0.1",
 ]
 
 [project.urls]
