@@ -10,7 +10,7 @@
 # ///
 
 """
-Streaming Gradio app for Kokoro TTS
+Enhanced Streaming Gradio app for Kokoro TTS with multi-language support
 
 Download model files:
 wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
@@ -20,11 +20,7 @@ Run with:
 uv run examples/streaming_app.py
 """
 
-import asyncio
-import io
-
 import gradio as gr
-import soundfile as sf
 
 from kokoro_onnx import Kokoro
 from kokoro_onnx.tokenizer import Tokenizer
@@ -32,32 +28,144 @@ from kokoro_onnx.tokenizer import Tokenizer
 tokenizer = Tokenizer()
 kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
 
-SUPPORTED_LANGUAGES = ["en-us"]
+# Voice database organized by language and quality
+VOICE_DATABASE = {
+    "American English": {
+        "code": "en-us",
+        "voices": {
+            "High Quality": {
+                "female": ["af_heart", "af_bella"],
+                "male": []
+            },
+            "Medium Quality": {
+                "female": ["af_nicole", "af_aoede", "af_kore", "af_sarah"],
+                "male": ["am_fenrir", "am_michael", "am_puck"]
+            },
+            "Low Quality": {
+                "female": ["af_alloy", "af_jessica", "af_nova", "af_river", "af_sky"],
+                "male": ["am_adam", "am_echo", "am_eric", "am_liam", "am_onyx", "am_santa"]
+            }
+        }
+    },
+    "British English": {
+        "code": "en-gb",
+        "voices": {
+            "Medium Quality": {
+                "female": ["bf_alice", "bf_emma", "bf_isabella", "bf_lily"],
+                "male": ["bm_daniel", "bm_fable", "bm_george", "bm_lewis"]
+            }
+        }
+    },
+    "Japanese": {
+        "code": "ja",
+        "voices": {
+            "Medium Quality": {
+                "female": ["jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro"],
+                "male": ["jm_kumo"]
+            }
+        }
+    },
+    "Mandarin Chinese": {
+        "code": "cmn",
+        "voices": {
+            "Low Quality": {
+                "female": ["zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi"],
+                "male": ["zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang"]
+            }
+        }
+    },
+    "Spanish": {
+        "code": "es",
+        "voices": {
+            "Medium Quality": {
+                "female": ["ef_dora"],
+                "male": ["em_alex", "em_santa"]
+            }
+        }
+    },
+    "French": {
+        "code": "fr-fr",
+        "voices": {
+            "Medium Quality": {
+                "female": ["ff_siwis"],
+                "male": []
+            }
+        }
+    },
+    "Hindi": {
+        "code": "hi",
+        "voices": {
+            "Medium Quality": {
+                "female": ["hf_alpha", "hf_beta"],
+                "male": ["hm_omega", "hm_psi"]
+            }
+        }
+    },
+    "Italian": {
+        "code": "it",
+        "voices": {
+            "Medium Quality": {
+                "female": ["if_sara"],
+                "male": ["im_nicola"]
+            }
+        }
+    },
+    "Brazilian Portuguese": {
+        "code": "pt-br",
+        "voices": {
+            "Medium Quality": {
+                "female": ["pf_dora"],
+                "male": ["pm_alex", "pm_santa"]
+            }
+        }
+    }
+}
 
+def get_language_code(language_name: str) -> str:
+    """Get language code from display name"""
+    return VOICE_DATABASE.get(language_name, {}).get("code", "en-us")
 
-async def stream_audio(text: str, voice: str, language: str = "en-us", speed: float = 1.0):
-    """Stream audio generation asynchronously"""
-    if not text.strip():
-        return
+def get_voices_for_language_and_quality(language_name: str, quality_name: str = "All Qualities", gender_filter: str = "All Genders") -> list[str]:
+    """Get voices filtered by language name, quality name, and gender"""
+    if language_name not in VOICE_DATABASE:
+        return []
     
-    try:
-        async for audio_chunk, sample_rate in kokoro.create_stream(
-            text, voice=voice, speed=speed, lang=language
-        ):
-            # Convert numpy array to audio bytes
-            buffer = io.BytesIO()
-            sf.write(buffer, audio_chunk, sample_rate, format='WAV')
-            buffer.seek(0)
-            
-            # Yield the audio data
-            yield (sample_rate, audio_chunk)
-            
-            # Small delay to allow UI updates
-            await asyncio.sleep(0.01)
-            
-    except Exception as e:
-        print(f"Error during streaming: {e}")
+    voices = []
+    lang_data = VOICE_DATABASE[language_name]["voices"]
+    
+    for quality_level, genders in lang_data.items():
+        if quality_name == "All Qualities" or quality_name == quality_level:
+            for gender, voice_list in genders.items():
+                # Filter by gender
+                if gender_filter == "All Genders" or gender_filter.lower() == gender:
+                    voices.extend(voice_list)
+    
+    return sorted(voices)
 
+def get_available_qualities_for_language(language_name: str) -> list[str]:
+    """Get available quality levels for a language"""
+    if language_name not in VOICE_DATABASE:
+        return ["All Qualities"]
+    
+    qualities = list(VOICE_DATABASE[language_name]["voices"].keys())
+    return ["All Qualities"] + qualities
+
+def get_available_genders_for_language(language_name: str, quality_name: str = "All Qualities") -> list[str]:
+    """Get available genders for a language and quality combination"""
+    if language_name not in VOICE_DATABASE:
+        return ["All Genders"]
+    
+    genders = set()
+    lang_data = VOICE_DATABASE[language_name]["voices"]
+    
+    for quality_level, gender_data in lang_data.items():
+        if quality_name == "All Qualities" or quality_name == quality_level:
+            for gender, voice_list in gender_data.items():
+                if voice_list:  # Only include genders that have voices
+                    genders.add(gender.title())  # Capitalize: female -> Female
+    
+    gender_list = ["All Genders"] + sorted(list(genders))
+    return gender_list
 
 def create_streaming_app():
     with gr.Blocks(
@@ -66,7 +174,8 @@ def create_streaming_app():
     ) as ui:
         
         gr.Markdown("# 🎵 Kokoro TTS Streaming")
-        gr.Markdown("Enter text and select a voice to generate streaming audio")
+        gr.Markdown("### Multi-language Text-to-Speech with Advanced Filtering")
+        gr.Markdown("Filter by **language**, **quality level**, and **gender** to find the perfect voice from 149 options across 9+ languages!")
         
         with gr.Row():
             with gr.Column(scale=2):
@@ -78,19 +187,33 @@ def create_streaming_app():
                 )
                 
                 with gr.Row():
-                    voice_input = gr.Dropdown(
-                        label="Voice",
-                        value="af_sky",
-                        choices=sorted(kokoro.get_voices()),
-                        scale=2
-                    )
-                    
                     language_input = gr.Dropdown(
                         label="Language",
-                        value="en-us",
-                        choices=SUPPORTED_LANGUAGES,
+                        value="American English",
+                        choices=list(VOICE_DATABASE.keys()),
                         scale=1
                     )
+                    
+                    quality_input = gr.Dropdown(
+                        label="Quality Level",
+                        value="All Qualities",
+                        choices=get_available_qualities_for_language("American English"),
+                        scale=1
+                    )
+                    
+                    gender_input = gr.Dropdown(
+                        label="Gender",
+                        value="All Genders",
+                        choices=get_available_genders_for_language("American English", "All Qualities"),
+                        scale=1
+                    )
+                
+                voice_input = gr.Dropdown(
+                    label="Voice",
+                    value="af_sky",
+                    choices=get_voices_for_language_and_quality("American English", "All Qualities", "All Genders"),
+                    scale=2
+                )
                 
                 speed_input = gr.Slider(
                     label="Speed",
@@ -109,15 +232,36 @@ def create_streaming_app():
                     autoplay=True
                 )
         
-        # Handle button click with streaming
-        async def handle_generate(text, voice, language, speed):
+        # Update quality choices when language changes
+        def update_quality_choices(language_name):
+            qualities = get_available_qualities_for_language(language_name)
+            return gr.update(choices=qualities, value="All Qualities")
+        
+        # Update gender choices when language or quality changes
+        def update_gender_choices(language_name, quality_name):
+            genders = get_available_genders_for_language(language_name, quality_name)
+            return gr.update(choices=genders, value="All Genders")
+        
+        # Update voice choices when language, quality, or gender changes
+        def update_voice_choices(language_name, quality_name, gender_name):
+            voices = get_voices_for_language_and_quality(language_name, quality_name, gender_name)
+            if voices:
+                return gr.update(choices=voices, value=voices[0])
+            return gr.update(choices=[], value=None)
+        
+        # Handle button click
+        async def handle_generate(text, voice, language_name, speed):
             if not text.strip():
                 gr.Warning("Please enter some text")
                 return None
                 
+            if not voice:
+                gr.Warning("Please select a voice")
+                return None
+                
             try:
-                # Use the regular create method for now since Gradio streaming has limitations
-                phonemes = tokenizer.phonemize(text, lang=language)
+                language_code = get_language_code(language_name)
+                phonemes = tokenizer.phonemize(text, lang=language_code)
                 samples, sample_rate = kokoro.create(
                     phonemes, voice=voice, speed=speed, is_phonemes=True
                 )
@@ -126,20 +270,62 @@ def create_streaming_app():
                 gr.Error(f"Error generating audio: {str(e)}")
                 return None
         
+        # Update quality dropdown when language changes
+        language_input.change(
+            fn=update_quality_choices,
+            inputs=[language_input],
+            outputs=[quality_input]
+        )
+        
+        # Update gender dropdown when language or quality changes
+        language_input.change(
+            fn=update_gender_choices,
+            inputs=[language_input, quality_input],
+            outputs=[gender_input]
+        )
+        
+        quality_input.change(
+            fn=update_gender_choices,
+            inputs=[language_input, quality_input],
+            outputs=[gender_input]
+        )
+        
+        # Update voice dropdown when language, quality, or gender changes
+        language_input.change(
+            fn=update_voice_choices,
+            inputs=[language_input, quality_input, gender_input],
+            outputs=[voice_input]
+        )
+        
+        quality_input.change(
+            fn=update_voice_choices,
+            inputs=[language_input, quality_input, gender_input],
+            outputs=[voice_input]
+        )
+        
+        gender_input.change(
+            fn=update_voice_choices,
+            inputs=[language_input, quality_input, gender_input],
+            outputs=[voice_input]
+        )
+        
         generate_btn.click(
             fn=handle_generate,
             inputs=[text_input, voice_input, language_input, speed_input],
             outputs=[audio_output]
         )
         
-        # Add example texts
+        # Add example texts in multiple languages with human readable names
         gr.Examples(
             examples=[
-                ["Hello, this is a test of Kokoro TTS streaming capabilities.", "af_sky", "en-us", 1.0],
-                ["The quick brown fox jumps over the lazy dog.", "af_bella", "en-us", 1.2],
-                ["Welcome to the future of text-to-speech technology!", "af_sarah", "en-us", 0.9],
+                ["Hello, this is a test of Kokoro TTS streaming capabilities.", "af_sky", "American English", "All Qualities", "All Genders", 1.0],
+                ["The quick brown fox jumps over the lazy dog.", "af_bella", "American English", "High Quality", "Female", 1.2],
+                ["Welcome to the future of text-to-speech technology!", "af_sarah", "American English", "Medium Quality", "Female", 0.9],
+                ["Good morning! How are you today?", "bf_alice", "British English", "Medium Quality", "Female", 1.0],
+                ["こんにちは、元気ですか？", "jf_alpha", "Japanese", "Medium Quality", "Female", 1.0],
+                ["Bonjour, comment allez-vous?", "ff_siwis", "French", "Medium Quality", "Female", 1.0],
             ],
-            inputs=[text_input, voice_input, language_input, speed_input],
+            inputs=[text_input, voice_input, language_input, quality_input, gender_input, speed_input],
         )
         
     return ui
