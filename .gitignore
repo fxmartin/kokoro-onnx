@@ -25,3 +25,9 @@ espeak-ng-data/
 
 # Virtual environments
 .venv
+
+# Environment configuration
+.env
+
+# Logs
+logs/
